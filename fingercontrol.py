@@ -4,472 +4,400 @@ import pyautogui
 import time
 import math
 import platform
-import sys
 
 class GestureTracker:
     def __init__(self):
-        print("🔧 GESTURE CONTROL TROUBLESHOOTER")
-        print("=" * 50)
+        print("🎯 Gesture Control - Starting...")
         
-        # Disable pyautogui failsafe for testing
+        # Disable pyautogui failsafe
         pyautogui.FAILSAFE = False
-        pyautogui.PAUSE = 0.1
-        
-        # Test system compatibility
-        self.test_system_compatibility()
+        pyautogui.PAUSE = 0.05
         
         # Camera setup
-        self.setup_camera()
+        self.cap = self.setup_camera()
+        if not self.cap:
+            print("❌ Camera initialization failed!")
+            return
         
-        # Gesture variables
+        # Reference finger tracking
+        self.reference_finger = None
+        self.is_calibrated = False
+        self.calibration_samples = []
+        self.calibration_count = 0
+        self.required_samples = 10
+        
+        # Gesture control
         self.last_action_time = 0
-        self.action_cooldown = 1.0
-        self.gesture_buffer = []
-        self.buffer_size = 2
+        self.action_cooldown = 1.5  # Increased cooldown
         
-        # Skin detection (optimized for various skin tones)
-        self.skin_lower = np.array([0, 20, 70])
-        self.skin_upper = np.array([20, 255, 255])
+        # Movement tracking
+        self.position_history = []
+        self.history_size = 8
+        self.movement_threshold = 35  # Reduced sensitivity
         
         # Wave detection
         self.wave_positions = []
-        self.wave_detection_window = 15
+        self.wave_window = 12
         
-        print("\n✅ Troubleshooter initialized successfully!")
+        # Tracking stability
+        self.stable_position = None
+        self.stability_count = 0
+        self.stability_threshold = 5
         
-    def test_system_compatibility(self):
-        """Test system and pyautogui compatibility"""
-        print(f"\n🖥️  System Info:")
-        print(f"   Platform: {platform.system()} {platform.release()}")
-        print(f"   Python: {sys.version.split()[0]}")
+        print("✅ Initialization complete!")
         
-        # Test pyautogui functionality
-        print(f"\n🎮 Testing PyAutoGUI:")
-        try:
-            screen_size = pyautogui.size()
-            print(f"   ✅ Screen size detected: {screen_size}")
-            
-            # Test if we can get mouse position
-            mouse_pos = pyautogui.position()
-            print(f"   ✅ Mouse position: {mouse_pos}")
-            
-            # Test key press (safe test)
-            print(f"   🔄 Testing key press in 3 seconds...")
-            time.sleep(3)
-            pyautogui.press('space')
-            print(f"   ✅ Space key press sent successfully!")
-            
-        except Exception as e:
-            print(f"   ❌ PyAutoGUI Error: {e}")
-            print(f"   💡 Solution: Install with: pip install pyautogui")
-            
-            # macOS specific fix
-            if platform.system() == "Darwin":
-                print(f"   🍎 macOS Fix: Grant accessibility permissions:")
-                print(f"      System Preferences > Security & Privacy > Accessibility")
-                print(f"      Add Python/Terminal to allowed apps")
-    
     def setup_camera(self):
-        """Setup and test camera"""
-        print(f"\n📹 Camera Setup:")
-        
-        # Try different camera indices
-        self.cap = None
-        for i in range(5):
+        """Setup camera with error handling"""
+        for i in range(3):
             cap = cv2.VideoCapture(i)
             if cap.isOpened():
                 ret, frame = cap.read()
                 if ret:
-                    self.cap = cap
-                    print(f"   ✅ Camera {i} connected successfully!")
-                    print(f"   📐 Resolution: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
-                    break
-                else:
-                    cap.release()
-            else:
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
+                    print(f"📹 Camera {i} connected")
+                    return cap
                 cap.release()
-        
-        if self.cap is None:
-            print(f"   ❌ No cameras found!")
-            print(f"   💡 Solutions:")
-            print(f"      1. Check camera connection")
-            print(f"      2. Close other apps using camera")
-            print(f"      3. Try running as administrator")
-            return False
-            
-        # Optimize camera settings
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
-        
-        return True
+        return None
     
-    def test_gesture_detection(self):
-        """Interactive gesture detection test"""
-        if not self.cap:
-            return
-            
-        print(f"\n🎯 GESTURE DETECTION TEST")
-        print(f"=" * 30)
-        print(f"Instructions:")
-        print(f"1. Position yourself 2-3 feet from camera")
-        print(f"2. Try pointing LEFT and RIGHT clearly")
-        print(f"3. Try waving your hand horizontally")
-        print(f"4. Watch the detection feedback")
-        print(f"5. Press 'q' to quit, 'space' to test key press")
-        print(f"\nStarting in 3 seconds...")
-        time.sleep(3)
-        
-        detection_count = {"RIGHT": 0, "LEFT": 0, "WAVE": 0}
+    def calibrate_finger(self):
+        """Calibrate and register the user's finger"""
+        print("\n🖐️ FINGER CALIBRATION")
+        print("Place your index finger in the green box and hold steady")
+        print("Press SPACE when ready, ESC to skip")
         
         while True:
             ret, frame = self.cap.read()
             if not ret:
-                break
+                continue
                 
             frame = cv2.flip(frame, 1)
+            h, w = frame.shape[:2]
             
-            # Handle keyboard input
+            # Draw calibration box
+            box_size = 60
+            center_x, center_y = w//2, h//2
+            cv2.rectangle(frame, 
+                         (center_x - box_size, center_y - box_size),
+                         (center_x + box_size, center_y + box_size),
+                         (0, 255, 0), 3)
+            
+            # Instructions
+            cv2.putText(frame, "Place finger in box - SPACE to calibrate", 
+                       (w//2 - 180, center_y - 100), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            
+            if self.calibration_count > 0:
+                cv2.putText(frame, f"Samples: {self.calibration_count}/{self.required_samples}", 
+                           (w//2 - 80, center_y + 100), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+            
+            cv2.imshow('Gesture Control - Calibration', frame)
+            
             key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
-                break
-            elif key == ord(' '):
-                # Test manual key press
-                pyautogui.press('space')
-                print("🔄 Manual space key pressed!")
-            elif key == ord('c'):
-                self.calibrate_skin_color_interactive(frame)
-            
-            # Detect gestures
-            hand_contour, hand_mask = self.detect_hand(frame)
-            fingertip, palm_center, pointing_direction = self.find_fingertip_and_direction(hand_contour)
-            
-            # Process gestures
-            detected_gesture = None
-            
-            if pointing_direction in ["LEFT", "RIGHT"]:
-                detected_gesture = pointing_direction
-            elif self.detect_wave_gesture(fingertip):
-                detected_gesture = "WAVE"
-            
-            # Update detection counts
-            if detected_gesture:
-                detection_count[detected_gesture] += 1
-                print(f"🎯 Detected: {detected_gesture} (Count: {detection_count[detected_gesture]})")
+            if key == ord(' '):
+                # Sample the calibration area
+                cal_region = frame[center_y - box_size//2:center_y + box_size//2,
+                                 center_x - box_size//2:center_x + box_size//2]
                 
-                # Test actual key press
-                current_time = time.time()
-                if current_time - self.last_action_time > self.action_cooldown:
-                    if detected_gesture == "RIGHT":
-                        pyautogui.press('space')
-                        print("   ➡️ SPACE pressed (Next slide)")
-                    elif detected_gesture == "LEFT":
-                        pyautogui.press('left')
-                        print("   ⬅️ LEFT ARROW pressed (Previous slide)")
-                    elif detected_gesture == "WAVE":
-                        pyautogui.press('escape')
-                        print("   👋 ESCAPE pressed (Exit)")
+                if cal_region.size > 0:
+                    hsv_sample = cv2.cvtColor(cal_region, cv2.COLOR_BGR2HSV)
+                    mean_hsv = np.mean(hsv_sample.reshape(-1, 3), axis=0)
+                    self.calibration_samples.append(mean_hsv)
+                    self.calibration_count += 1
                     
-                    self.last_action_time = current_time
-            
-            # Enhanced visual feedback
-            self.draw_debug_info(frame, hand_contour, fingertip, palm_center, 
-                               pointing_direction, detected_gesture, hand_mask, detection_count)
-            
-            cv2.imshow('🔧 GESTURE TROUBLESHOOTER', frame)
-        
-        print(f"\n📊 Detection Summary:")
-        for gesture, count in detection_count.items():
-            print(f"   {gesture}: {count} detections")
+                    if self.calibration_count >= self.required_samples:
+                        self.finalize_calibration()
+                        break
+                        
+            elif key == 27:  # ESC
+                print("Calibration skipped - using default settings")
+                self.use_default_calibration()
+                break
+                
+        cv2.destroyAllWindows()
     
-    def detect_hand(self, frame):
-        """Improved hand detection"""
+    def finalize_calibration(self):
+        """Process calibration samples"""
+        if not self.calibration_samples:
+            self.use_default_calibration()
+            return
+            
+        # Calculate mean and standard deviation
+        samples_array = np.array(self.calibration_samples)
+        mean_hsv = np.mean(samples_array, axis=0)
+        std_hsv = np.std(samples_array, axis=0)
+        
+        # Create adaptive thresholds
+        h_range = max(15, std_hsv[0] * 2)
+        s_range = max(60, std_hsv[1] * 1.5)
+        v_range = max(60, std_hsv[2] * 1.5)
+        
+        self.skin_lower = np.array([
+            max(0, mean_hsv[0] - h_range),
+            max(0, mean_hsv[1] - s_range),
+            max(0, mean_hsv[2] - v_range)
+        ])
+        
+        self.skin_upper = np.array([
+            min(179, mean_hsv[0] + h_range),
+            255,
+            255
+        ])
+        
+        self.is_calibrated = True
+        print(f"✅ Finger calibrated successfully!")
+    
+    def use_default_calibration(self):
+        """Use default skin detection values"""
+        self.skin_lower = np.array([0, 30, 60])
+        self.skin_upper = np.array([20, 255, 255])
+        self.is_calibrated = True
+    
+    def detect_finger(self, frame):
+        """Detect and track the calibrated finger"""
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, self.skin_lower, self.skin_upper)
         
-        # Create skin mask
-        skin_mask = cv2.inRange(hsv, self.skin_lower, self.skin_upper)
-        
-        # Improved noise reduction
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        skin_mask = cv2.morphologyEx(skin_mask, cv2.MORPH_OPEN, kernel)
-        skin_mask = cv2.morphologyEx(skin_mask, cv2.MORPH_CLOSE, kernel)
-        
-        # Gaussian blur for smoothing
-        skin_mask = cv2.GaussianBlur(skin_mask, (5, 5), 0)
+        # Clean up the mask
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.medianBlur(mask, 5)
         
         # Find contours
-        contours, _ = cv2.findContours(skin_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        if contours:
-            # Filter and find best hand contour
-            valid_contours = []
-            for contour in contours:
-                area = cv2.contourArea(contour)
-                if area > 3000:  # Larger minimum area
-                    # Check if contour looks hand-like
-                    x, y, w, h = cv2.boundingRect(contour)
-                    aspect_ratio = w / h
-                    if 0.4 < aspect_ratio < 2.5:  # Hand proportions
-                        valid_contours.append((contour, area))
+        if not contours:
+            return None, None
+        
+        # Filter valid finger contours
+        valid_contours = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if 1500 < area < 15000:  # Finger-sized area
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = w / h if h > 0 else 0
+                if 0.3 < aspect_ratio < 3.0:  # Reasonable proportions
+                    valid_contours.append(contour)
+        
+        if not valid_contours:
+            return None, None
+        
+        # Get the largest valid contour (assumed to be the finger)
+        finger_contour = max(valid_contours, key=cv2.contourArea)
+        
+        # Find fingertip (topmost point)
+        topmost = tuple(finger_contour[finger_contour[:,:,1].argmin()][0])
+        
+        return topmost, finger_contour
+    
+    def is_position_stable(self, current_pos):
+        """Check if finger position is stable"""
+        if not current_pos:
+            return False
             
-            if valid_contours:
-                # Get largest valid contour
-                hand_contour = max(valid_contours, key=lambda x: x[1])[0]
-                return hand_contour, skin_mask
-        
-        return None, skin_mask
-    
-    def find_fingertip_and_direction(self, hand_contour):
-        """Enhanced fingertip detection"""
-        if hand_contour is None:
-            return None, None, None
-        
-        # Get hand center
-        M = cv2.moments(hand_contour)
-        if M["m00"] == 0:
-            return None, None, None
-        
-        palm_center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
-        
-        # Find convex hull and defects
-        hull = cv2.convexHull(hand_contour, returnPoints=False)
-        if len(hull) > 3:
-            try:
-                defects = cv2.convexityDefects(hand_contour, hull)
-                
-                if defects is not None:
-                    # Find fingertip candidates
-                    fingertip_candidates = []
-                    
-                    # Method 1: Furthest point from palm center
-                    max_distance = 0
-                    best_fingertip = None
-                    
-                    for point in hand_contour:
-                        pt = tuple(point[0])
-                        distance = math.sqrt((pt[0] - palm_center[0])**2 + (pt[1] - palm_center[1])**2)
-                        if distance > max_distance:
-                            max_distance = distance
-                            best_fingertip = pt
-                    
-                    # Method 2: Top-most point (for pointing up)
-                    topmost = tuple(hand_contour[hand_contour[:,:,1].argmin()][0])
-                    
-                    # Choose the best fingertip
-                    fingertip = best_fingertip if max_distance > 80 else topmost
-                    
-                    if fingertip and max_distance > 60:
-                        # Calculate pointing direction with better thresholds
-                        dx = fingertip[0] - palm_center[0]
-                        dy = fingertip[1] - palm_center[1]
-                        
-                        direction = None
-                        # More sensitive horizontal detection
-                        if abs(dx) > 50:  # Horizontal pointing threshold
-                            if dx > 50:
-                                direction = "RIGHT"
-                            elif dx < -50:
-                                direction = "LEFT"
-                        
-                        return fingertip, palm_center, direction
-            except:
-                pass
-        
-        return None, None, None
-    
-    def detect_wave_gesture(self, fingertip):
-        """Enhanced wave detection"""
-        if fingertip is None:
+        if self.stable_position is None:
+            self.stable_position = current_pos
+            self.stability_count = 1
             return False
         
-        self.wave_positions.append(fingertip[0])
+        # Calculate distance from stable position
+        distance = math.sqrt((current_pos[0] - self.stable_position[0])**2 + 
+                           (current_pos[1] - self.stable_position[1])**2)
         
-        if len(self.wave_positions) > self.wave_detection_window:
+        if distance < 20:  # Position is stable
+            self.stability_count += 1
+            return self.stability_count >= self.stability_threshold
+        else:
+            # Position changed significantly
+            self.stable_position = current_pos
+            self.stability_count = 1
+            return False
+    
+    def detect_gesture(self, fingertip):
+        """Detect gestures based on fingertip movement"""
+        if not fingertip:
+            return None
+        
+        # Add to position history
+        self.position_history.append(fingertip)
+        if len(self.position_history) > self.history_size:
+            self.position_history.pop(0)
+        
+        if len(self.position_history) < 4:
+            return None
+        
+        # Check if position is stable (no gesture)
+        if self.is_position_stable(fingertip):
+            return None
+        
+        # Calculate movement vector
+        start_pos = self.position_history[0]
+        end_pos = self.position_history[-1]
+        
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        
+        # Check for directional gestures
+        if abs(dx) > self.movement_threshold and abs(dx) > abs(dy) * 1.5:
+            if dx > 0:
+                return "RIGHT"
+            else:
+                return "LEFT"
+        
+        # Check for wave gesture
+        if self.detect_wave():
+            return "WAVE"
+        
+        return None
+    
+    def detect_wave(self):
+        """Improved wave detection"""
+        if len(self.position_history) < 6:
+            return False
+        
+        # Add current position to wave tracking
+        current_x = self.position_history[-1][0]
+        self.wave_positions.append(current_x)
+        
+        if len(self.wave_positions) > self.wave_window:
             self.wave_positions.pop(0)
         
         if len(self.wave_positions) < 8:
             return False
         
-        # Analyze horizontal movement pattern
+        # Analyze for wave pattern (back and forth movement)
         direction_changes = 0
         last_direction = None
         
         for i in range(2, len(self.wave_positions)):
             movement = self.wave_positions[i] - self.wave_positions[i-2]
             
-            if abs(movement) > 15:  # Movement threshold
+            if abs(movement) > 25:  # Significant movement
                 current_direction = "right" if movement > 0 else "left"
                 if last_direction and current_direction != last_direction:
                     direction_changes += 1
                 last_direction = current_direction
         
-        # Calculate movement range
-        if len(self.wave_positions) >= 5:
-            movement_range = max(self.wave_positions[-5:]) - min(self.wave_positions[-5:])
-            
-            # Wave detected if enough direction changes and movement
-            if direction_changes >= 2 and movement_range > 80:
-                self.wave_positions = []  # Reset
-                return True
+        # Check movement range
+        movement_range = max(self.wave_positions) - min(self.wave_positions)
+        
+        # Wave detected if multiple direction changes and good range
+        if direction_changes >= 2 and movement_range > 80:
+            self.wave_positions = []  # Reset
+            return True
         
         return False
     
-    def calibrate_skin_color_interactive(self, frame):
-        """Interactive skin color calibration"""
-        h, w = frame.shape[:2]
-        center_x, center_y = w//2, h//2
+    def execute_gesture_action(self, gesture):
+        """Execute keyboard action for detected gesture"""
+        current_time = time.time()
+        if current_time - self.last_action_time < self.action_cooldown:
+            return False
         
-        # Draw calibration box
-        cv2.rectangle(frame, (center_x-60, center_y-60), (center_x+60, center_y+60), (0, 255, 0), 3)
-        cv2.putText(frame, "CALIBRATION - Press SPACE", (center_x-120, center_y-80), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        if gesture == "RIGHT":
+            pyautogui.press('right')
+            print("➡️ Next slide")
+        elif gesture == "LEFT":
+            pyautogui.press('left')
+            print("⬅️ Previous slide")
+        elif gesture == "WAVE":
+            pyautogui.press('escape')
+            print("👋 Exit presentation")
         
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord(' '):
-            # Sample HSV from center region
-            center_region = frame[center_y-30:center_y+30, center_x-30:center_x+30]
-            hsv_region = cv2.cvtColor(center_region, cv2.COLOR_BGR2HSV)
-            mean_hsv = np.mean(hsv_region.reshape(-1, 3), axis=0)
-            
-            # Update skin color range with wider tolerance
-            h_tol, s_tol, v_tol = 20, 100, 100
-            self.skin_lower = np.array([
-                max(0, mean_hsv[0] - h_tol),
-                max(0, mean_hsv[1] - s_tol),
-                max(0, mean_hsv[2] - v_tol)
-            ])
-            self.skin_upper = np.array([
-                min(179, mean_hsv[0] + h_tol),
-                255,
-                255
-            ])
-            
-            print(f"🎨 Skin calibrated! HSV: {self.skin_lower} → {self.skin_upper}")
+        self.last_action_time = current_time
+        self.position_history = []  # Reset movement history
+        return True
     
-    def draw_debug_info(self, frame, hand_contour, fingertip, palm_center, 
-                       pointing_direction, detected_gesture, hand_mask, detection_count):
-        """Enhanced debug visualization"""
+    def draw_interface(self, frame, fingertip, gesture, finger_contour):
+        """Draw minimal interface"""
         h, w = frame.shape[:2]
         
-        # Draw hand contour
-        if hand_contour is not None:
-            cv2.drawContours(frame, [hand_contour], -1, (0, 255, 255), 2)
-            
-            # Draw bounding rectangle
-            x, y, w_rect, h_rect = cv2.boundingRect(hand_contour)
-            cv2.rectangle(frame, (x, y), (x + w_rect, y + h_rect), (255, 0, 0), 2)
-            
-            # Show contour area
-            area = cv2.contourArea(hand_contour)
-            cv2.putText(frame, f"Area: {int(area)}", (x, y-10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # Draw finger tracking
+        if fingertip and finger_contour is not None:
+            cv2.drawContours(frame, [finger_contour], -1, (0, 255, 255), 2)
+            cv2.circle(frame, fingertip, 8, (0, 255, 0), -1)
         
-        # Draw fingertip and palm
-        if fingertip and palm_center:
-            cv2.circle(frame, fingertip, 10, (0, 255, 255), -1)
-            cv2.circle(frame, palm_center, 8, (255, 0, 255), -1)
-            cv2.line(frame, palm_center, fingertip, (0, 255, 0), 3)
-            
-            # Show distance
-            distance = math.sqrt((fingertip[0] - palm_center[0])**2 + (fingertip[1] - palm_center[1])**2)
-            cv2.putText(frame, f"Dist: {int(distance)}", (fingertip[0]+15, fingertip[1]), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # Show current gesture
+        if gesture:
+            cv2.putText(frame, f"GESTURE: {gesture}", (10, 40), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         
-        # Status information
-        y_offset = 30
-        
-        # Current gesture
-        if detected_gesture:
-            color = (0, 255, 0)
-            cv2.putText(frame, f"GESTURE: {detected_gesture}", (10, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-        else:
-            cv2.putText(frame, "GESTURE: None", (10, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        y_offset += 40
-        
-        # Pointing direction
-        if pointing_direction:
-            cv2.putText(frame, f"DIRECTION: {pointing_direction}", (10, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-        y_offset += 35
-        
-        # Detection counts
-        for gesture, count in detection_count.items():
-            cv2.putText(frame, f"{gesture}: {count}", (10, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
-            y_offset += 25
-        
-        # Wave positions indicator
-        if len(self.wave_positions) > 0:
-            cv2.putText(frame, f"Wave buffer: {len(self.wave_positions)}", (10, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 1)
+        # Show calibration status
+        status = "CALIBRATED" if self.is_calibrated else "NOT CALIBRATED"
+        color = (0, 255, 0) if self.is_calibrated else (0, 0, 255)
+        cv2.putText(frame, f"Status: {status}", (10, h-30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         
         # Cooldown indicator
         current_time = time.time()
         cooldown_remaining = max(0, self.action_cooldown - (current_time - self.last_action_time))
         if cooldown_remaining > 0:
-            cv2.putText(frame, f"Cooldown: {cooldown_remaining:.1f}s", (w-200, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.putText(frame, f"Cooldown: {cooldown_remaining:.1f}s", (w-200, 40), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 100, 255), 2)
         
-        # Instructions
-        cv2.putText(frame, "Controls: 'q'=quit, 'c'=calibrate, SPACE=test key", 
-                   (10, h-20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        # Show hand mask in corner
-        if hand_mask is not None:
-            mask_small = cv2.resize(hand_mask, (120, 90))
-            mask_color = cv2.cvtColor(mask_small, cv2.COLOR_GRAY2BGR)
-            frame[h-100:h-10, w-130:w-10] = mask_color
-            cv2.putText(frame, "Hand Mask", (w-125, h-105), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+        # Controls
+        cv2.putText(frame, "Q: Quit | R: Recalibrate", (10, h-10), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     
-    def run_comprehensive_test(self):
-        """Run all tests"""
+    def run(self):
+        """Main control loop"""
         if not self.cap:
-            print("❌ Camera not available, cannot run gesture tests")
             return
         
-        print(f"\n🚀 STARTING COMPREHENSIVE TEST")
-        print(f"This will test:")
-        print(f"1. Hand detection accuracy")
-        print(f"2. Gesture recognition")
-        print(f"3. Key press functionality")
-        print(f"4. Real-time performance")
+        # Initial calibration
+        self.calibrate_finger()
         
-        input("\nPress Enter to start (make sure your presentation is ready)...")
+        print("\n🚀 Gesture control active!")
+        print("Gestures: Point LEFT/RIGHT for slides, WAVE to exit")
+        print("Press 'Q' to quit, 'R' to recalibrate")
         
-        self.test_gesture_detection()
+        while True:
+            ret, frame = self.cap.read()
+            if not ret:
+                continue
+            
+            frame = cv2.flip(frame, 1)
+            
+            # Handle keyboard input
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+            elif key == ord('r'):
+                self.calibrate_finger()
+                continue
+            
+            # Detect finger and gestures
+            fingertip, finger_contour = self.detect_finger(frame)
+            gesture = self.detect_gesture(fingertip)
+            
+            # Execute gesture action
+            if gesture:
+                self.execute_gesture_action(gesture)
+            
+            # Draw interface
+            self.draw_interface(frame, fingertip, gesture, finger_contour)
+            
+            cv2.imshow('Gesture Control', frame)
         
-        print(f"\n✅ Test completed!")
-        print(f"\n🎯 Next Steps:")
-        print(f"1. If gestures were detected but slides didn't change:")
-        print(f"   - Make sure your presentation app is in focus")
-        print(f"   - Try clicking on the presentation window first")
-        print(f"   - Check if presentation is in slideshow mode")
-        print(f"2. If hand detection was poor:")
-        print(f"   - Press 'c' to calibrate skin color")
-        print(f"   - Improve lighting conditions")
-        print(f"   - Try different hand positions")
-        print(f"3. If gestures weren't detected:")
-        print(f"   - Make bigger, clearer hand movements")
-        print(f"   - Point more horizontally (left/right)")
-        print(f"   - Wave more dramatically")
+        self.cleanup()
     
     def cleanup(self):
         """Clean up resources"""
         if self.cap:
             self.cap.release()
         cv2.destroyAllWindows()
+        print("\n👋 Gesture control stopped")
 
 if __name__ == "__main__":
-    troubleshooter = GestureTracker()
+    controller = GestureTracker()
     try:
-        troubleshooter.run_comprehensive_test()
+        controller.run()
     except KeyboardInterrupt:
-        print("\n\n👋 Test interrupted by user")
+        print("\n\nInterrupted by user")
     except Exception as e:
-        print(f"\n❌ Error during testing: {e}")
+        print(f"\nError: {e}")
     finally:
-        troubleshooter.cleanup()
-        print("🔧 Troubleshooter closed")
+        controller.cleanup()
