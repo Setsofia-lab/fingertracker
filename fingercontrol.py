@@ -6,7 +6,7 @@ import math
 import platform
 import sys
 
-class GestureTroubleshooter:
+class GestureTracker:
     def __init__(self):
         print("🔧 GESTURE CONTROL TROUBLESHOOTER")
         print("=" * 50)
@@ -463,7 +463,7 @@ class GestureTroubleshooter:
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    troubleshooter = GestureTroubleshooter()
+    troubleshooter = GestureTracker()
     try:
         troubleshooter.run_comprehensive_test()
     except KeyboardInterrupt:
